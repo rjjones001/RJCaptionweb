@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Caption Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Dancing+Script:wght@700&family=Great+Vibes&family=Montserrat:ital,wght@0,800;0,900;1,900&family=Pacifico&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#14141a;--card:#22222b;--ink:#f2f2f5;--mute:#9a9aa8;--acc:#ffb020}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,sans-serif;padding:14px;max-width:560px;margin-inline:auto}
+h1{font-size:20px;margin:4px 0 12px}
+.row{display:flex;gap:8px;margin-bottom:10px}
+input[type=file],select,button{font:inherit;color:var(--ink);background:var(--card);border:1px solid #33333f;border-radius:10px;padding:10px;min-width:0}
+input[type=file]{flex:1}
+select{flex:1}
+button{cursor:pointer}
+button.main{background:var(--acc);color:#1a1200;border:0;font-weight:700;flex:1}
+button:disabled{opacity:.5}
+button:focus-visible,select:focus-visible{outline:2px solid var(--acc)}
+canvas{width:100%;max-height:60vh;object-fit:contain;background:#000;border-radius:10px;display:block}
+#st{color:var(--mute);min-height:22px;margin:8px 0}
+#tp{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px}
+#tp button{white-space:nowrap}
+#tp button.on{border-color:var(--acc);color:var(--acc)}
+video{display:none}
+</style>
+</head>
+<body>
+<h1>Caption Studio</h1>
+<div class="row"><input type="file" id="file" accept="video/*"></div>
+<div class="row">
+  <select id="lang" aria-label="Spoken language">
+    <option value="">Auto-detect language</option>
+    <option value="english">English</option>
+    <option value="tamil">Tamil</option>
+    <option value="hindi">Hindi</option>
+  </select>
+  <button class="main" id="go" disabled>Generate captions</button>
+</div>
+<div id="st">Choose a video to start.</div>
+<canvas id="cv" width="360" height="640"></canvas>
+<video id="v" playsinline></video>
+<div class="row" style="margin-top:10px">
+  <button id="play" disabled>Play / Pause</button>
+  <button class="main" id="exp" disabled>Export video</button>
+</div>
+<div id="tp" role="group" aria-label="Caption style"></div>
+
+<script type="module">
+import {pipeline} from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2';
+
+const $=id=>document.getElementById(id);
+const v=$('v'),cv=$('cv'),ctx=cv.getContext('2d');
+let W=cv.width,H=cv.height,words=[],chunks=[],asr,ac,dest,sel=0;
+const status=t=>$('st').textContent=t;
+
+/* ---- Caption templates: add your own here ----
+   a = first line, b = second line. c = colour, or an array of colours for a vertical gradient.
+   f = font builder, s = size multiplier, up = force uppercase                              */
+const T=[
+ {n:'Gold Impact',  a:{f:p=>`${p}px "Bebas Neue"`,c:'#fff',up:1},                      b:{f:p=>`italic 900 ${p}px Montserrat`,c:['#8a6a10','#ffe27a','#b8860b'],s:1.1,up:1}},
+ {n:'Sunset Script',a:{f:p=>`900 ${p}px Montserrat`,c:['#ff6a00','#ffb347'],s:1.1},   b:{f:p=>`700 ${p}px "Dancing Script"`,c:['#fff','#8a8a95'],s:1.15}},
+ {n:'Neon Emerald', a:{f:p=>`${p}px Anton`,c:['#00ff2a','#0fa82a'],up:1},             b:{f:p=>`800 ${p}px Montserrat`,c:'#fff',up:1,s:.9}},
+ {n:'Sapphire',     a:{f:p=>`${p}px "Great Vibes"`,c:'#2f6bff',s:1.35},              b:{f:p=>`800 ${p}px Montserrat`,c:'#fff',up:1,s:.85}},
+ {n:'Lime Drop',    a:{f:p=>`900 ${p}px Montserrat`,c:'#fff',up:1,s:.95},            b:{f:p=>`900 ${p}px Montserrat`,c:['#b6f03c','#4f9a10'],up:1,s:1.15}},
+ {n:'Ocean Brush',  a:{f:p=>`${p}px Pacifico`,c:['#1e9bff','#0b4dff'],s:.95},        b:{f:p=>`${p}px Pacifico`,c:'#fff',s:.8}},
+ {n:'Classic Gold', a:{f:p=>`${p}px "Bebas Neue"`,c:['#a67c00','#fff0a8','#c89b10'],up:1,s:1.15}, b:{f:p=>`800 ${p}px Montserrat`,c:'#fff',up:1,s:.8}}
+];
+T.forEach((t,i)=>{const b=document.createElement('button');b.textContent=t.n;b.onclick=()=>{sel=i;mark()};$('tp').append(b)});
+const mark=()=>[...$('tp').children].forEach((b,i)=>b.classList.toggle('on',i===sel));mark();
+
+/* ---- drawing ---- */
+function drawLine(txt,y,L){
+  if(!txt)return 0;
+  if(L.up)txt=txt.toUpperCase();
+  let px=W*.085*(L.s||1);ctx.font=L.f(px);
+  let w=ctx.measureText(txt).width;
+  if(w>W*.92){px*=W*.92/w;ctx.font=L.f(px)}
+  let fill=L.c;
+  if(Array.isArray(fill)){const g=ctx.createLinearGradient(0,y-px*.9,0,y+px*.1);fill.forEach((c,i)=>g.addColorStop(i/(fill.length-1),c));fill=g}
+  ctx.shadowColor='rgba(0,0,0,.85)';ctx.shadowBlur=px*.18;ctx.shadowOffsetY=px*.05;
+  ctx.fillStyle=fill;ctx.fillText(txt,W/2,y);
+  return px;
+}
+function frame(){
+  ctx.shadowColor='transparent';
+  ctx.drawImage(v,0,0,W,H);
+  const t=v.currentTime,c=chunks.find(c=>t>=c.s&&t<=c.e);
+  if(!c)return;
+  ctx.textAlign='center';ctx.textBaseline='alphabetic';
+  const n=c.w.length,h=n>1?Math.ceil(n/2):0,tpl=T[sel];
+  const l1=c.w.slice(0,h).join(' '),l2=c.w.slice(h).join(' ');
+  const y1=H*.72,p1=drawLine(l1,y1,tpl.a);
+  drawLine(l2,y1+(p1?p1*1.05:0),tpl.b);
+}
+(function loop(){if(v.videoWidth)frame();requestAnimationFrame(loop)})();
+
+/* ---- load video ---- */
+$('file').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  v.src=URL.createObjectURL(f);
+  v.onloadedmetadata=()=>{
+    const s=Math.min(1,1280/Math.max(v.videoWidth,v.videoHeight));
+    W=cv.width=Math.round(v.videoWidth*s/2)*2;H=cv.height=Math.round(v.videoHeight*s/2)*2;
+    v.currentTime=.01;$('go').disabled=false;$('play').disabled=false;
+    status('Video ready. Tap "Generate captions".');
+  };
+};
+
+/* ---- transcribe on-device (Whisper) ---- */
+$('go').onclick=async()=>{
+  const f=$('file').files[0];if(!f)return;
+  $('go').disabled=true;
+  try{
+    status('Reading audio…');
+    const tmp=new AudioContext({sampleRate:16000});
+    const audio=(await tmp.decodeAudioData(await f.arrayBuffer())).getChannelData(0);
+    if(!asr)asr=await pipeline('automatic-speech-recognition','Xenova/whisper-base',{
+      progress_callback:p=>{if(p.status==='progress')status(`Downloading speech model… ${Math.round(p.progress)}%`)}
+    });
+    status('Listening… this can take a few minutes.');
+    const lang=$('lang').value;
+    const out=await asr(audio,{return_timestamps:'word',chunk_length_s:30,stride_length_s:5,task:'transcribe',...(lang?{language:lang}:{})});
+    words=out.chunks.map(c=>({t:c.text.trim(),s:c.timestamp[0],e:c.timestamp[1]??c.timestamp[0]+.4})).filter(w=>w.t);
+    buildChunks();
+    await Promise.all(['Anton','Bebas Neue','Montserrat','Dancing Script','Great Vibes','Pacifico'].map(n=>document.fonts.load(`40px "${n}"`)));
+    $('exp').disabled=false;
+    status(`Done: ${chunks.length} captions. Pick a style, then export.`);
+  }catch(err){console.error(err);status('Could not read this video\'s audio. Try a shorter or smaller file.')}
+  $('go').disabled=false;
+};
+function buildChunks(){
+  chunks=[];let cur=[];
+  words.forEach((w,i)=>{
+    cur.push(w);const nx=words[i+1];
+    if(cur.length>=4||!nx||nx.s-w.e>.6||/[.?!,]$/.test(w.t)){
+      chunks.push({s:cur[0].s,e:Math.min(cur.at(-1).e+.25,nx?nx.s:1e9),w:cur.map(x=>x.t)});cur=[];
+    }
+  });
+}
+
+/* ---- play + export ---- */
+function initAudio(){
+  if(ac)return ac.resume();
+  ac=new AudioContext();const src=ac.createMediaElementSource(v);
+  dest=ac.createMediaStreamDestination();src.connect(dest);src.connect(ac.destination);
+}
+$('play').onclick=async()=>{await initAudio();v.paused?v.play():v.pause()};
+$('exp').onclick=async()=>{
+  await initAudio();
+  const stream=cv.captureStream(30);
+  dest.stream.getAudioTracks().forEach(t=>stream.addTrack(t));
+  const mime=['video/mp4;codecs=avc1','video/webm;codecs=vp9,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m));
+  const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6e6}),parts=[];
+  rec.ondataavailable=e=>parts.push(e.data);
+  rec.onstop=()=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob(parts,{type:mime}));
+    a.download='captioned.'+(mime.includes('mp4')?'mp4':'webm');a.click();
+    status('Exported. Check your downloads.');$('exp').disabled=false;
+  };
+  $('exp').disabled=true;v.currentTime=0;await v.play();rec.start();
+  v.onended=()=>{rec.stop();v.onended=null};
+  status('Exporting in real time. Keep this tab open.');
+};
+</script>
+</body>
+</html>
