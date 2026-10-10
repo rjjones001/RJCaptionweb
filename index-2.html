@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Caption Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Dancing+Script:wght@700&family=Great+Vibes&family=Montserrat:ital,wght@0,800;0,900;1,900&family=Pacifico&family=Noto+Sans+Tamil:wght@800&family=Noto+Sans+Devanagari:wght@800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#13131a;--card:#1f1f29;--line:#32323f;--ink:#f3f3f7;--mute:#9b9bab;--acc:#ffb020}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,sans-serif;padding:14px;max-width:600px;margin-inline:auto}
+h1{font-size:20px;margin:4px 0 12px}
+h2{font-size:14px;margin:0 0 10px;color:var(--mute);font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+label{display:block;font-size:12px;color:var(--mute)}
+input,select,button{font:inherit;color:var(--ink);background:#15151d;border:1px solid var(--line);border-radius:10px;padding:9px;width:100%;min-width:0}
+button{cursor:pointer;width:auto}
+button.main{background:var(--acc);color:#1a1200;border:0;font-weight:700}
+button:disabled{opacity:.45;cursor:default}
+:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+input[type=range]{padding:0;height:28px;accent-color:var(--acc);border:0;background:none}
+input[type=color]{padding:2px;height:34px}
+canvas#cv{width:100%;max-height:62vh;object-fit:contain;background:#000;border-radius:12px;display:block}
+video{display:none}
+#st{color:var(--mute);min-height:20px;margin-top:8px;font-size:13px}
+progress{width:100%;height:8px;margin-top:8px;accent-color:var(--acc)}
+.bar{display:flex;gap:8px;align-items:center;margin-top:8px}
+.bar .main,.bar button{flex:1}
+#tm{font-size:12px;color:var(--mute);white-space:nowrap}
+#tp{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x proximity}
+.th{padding:3px;scroll-snap-align:start;flex:none}
+.th.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}
+.th canvas{width:150px;height:73px;display:block;border-radius:8px}
+.tune{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
+.chk{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink)}
+.chk input{width:auto}
+#list{max-height:420px;overflow-y:auto;margin-top:10px}
+.r{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.r.act .tx{border-color:var(--acc)}
+.tr{display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap}
+.tr label{display:flex;align-items:center;gap:4px}
+.tr input{width:76px;padding:7px}
+.tr button{padding:7px 9px;font-size:12px}
+.empty{color:var(--mute);font-size:13px}
+</style>
+</head>
+<body>
+<h1>Caption Studio</h1>
+
+<section class="card">
+  <input type="file" id="file" accept="video/*" aria-label="Choose a video">
+  <div class="grid">
+    <label>Spoken language
+      <select id="lang">
+        <option value="">Auto-detect</option>
+        <option value="en">English</option><option value="ta">Tamil</option>
+        <option value="hi">Hindi</option><option value="te">Telugu</option>
+        <option value="ml">Malayalam</option><option value="kn">Kannada</option>
+        <option value="bn">Bengali</option><option value="mr">Marathi</option>
+        <option value="ur">Urdu</option><option value="ar">Arabic</option>
+        <option value="es">Spanish</option><option value="fr">French</option>
+      </select>
+    </label>
+    <label>Engine
+      <select id="eng">
+        <option value="cloud">Cloud (best accuracy)</option>
+        <option value="local">On-device (free, offline)</option>
+      </select>
+    </label>
+    <label>On-device model
+      <select id="acc"><option value="Xenova/whisper-base">Fast</option><option value="Xenova/whisper-small" selected>Accurate</option></select>
+    </label>
+    <label>Words per caption
+      <select id="wpc"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option></select>
+    </label>
+  </div>
+  <label>Names or special words in the video (optional, cloud only)
+    <input id="hint" placeholder="e.g. BNI Karur, Jones, Sri Vari Hall" maxlength="300">
+  </label>
+  <button class="main" id="go" disabled style="width:100%;margin-top:10px">Generate captions</button>
+  <progress id="pr" max="100" hidden></progress>
+  <div id="st">Choose a video to start. Pick the spoken language for the best accuracy.</div>
+</section>
+
+<canvas id="cv" width="360" height="640"></canvas>
+<video id="v" playsinline></video>
+<div class="bar">
+  <button id="play" disabled>Play</button>
+  <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Seek" style="flex:4">
+  <span id="tm">0:00</span>
+</div>
+
+<section class="card" style="margin-top:12px">
+  <h2>Caption style</h2>
+  <div id="tp" role="group" aria-label="Caption style"></div>
+</section>
+
+<section class="card">
+  <h2>Animation and layout</h2>
+  <div class="tune">
+    <label>Caption in
+      <select id="ain">
+        <option value="none">None</option><option value="fade">Fade</option><option value="pop" selected>Pop</option>
+        <option value="zoom">Zoom in</option><option value="up">Slide up</option><option value="down">Slide down</option>
+        <option value="bounce">Bounce</option><option value="words">Word by word</option>
+      </select>
+    </label>
+    <label>Caption out
+      <select id="aout">
+        <option value="none">None</option><option value="fade" selected>Fade</option><option value="shrink">Shrink</option>
+        <option value="down">Slide down</option><option value="up">Slide up</option>
+      </select>
+    </label>
+    <label>Animation speed <input type="range" id="adur" min="8" max="60" value="25"></label>
+    <label>Size <input type="range" id="size" min="60" max="160" value="100"></label>
+    <label>Height <input type="range" id="pos" min="35" max="92" value="72"></label>
+    <label>Timing shift (all captions) <input type="range" id="delay" min="-100" max="100" value="0"></label>
+    <label>Highlight color <input type="color" id="hlc" value="#ffe600"></label>
+    <label class="chk"><input type="checkbox" id="up"> Uppercase</label>
+    <label class="chk"><input type="checkbox" id="hl"> Highlight spoken word</label>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Edit captions: text, in time, out time</h2>
+  <button class="main" id="add" disabled style="width:100%">+ Add caption at playhead</button>
+  <div id="list"><div class="empty">Captions will appear here after you generate them.</div></div>
+</section>
+
+<div class="bar">
+  <button class="main" id="exp" disabled>Export video</button>
+  <button id="srt" disabled>Download SRT</button>
+</div>
+
+<script type="module">
+import {pipeline} from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2';
+
+const $=id=>document.getElementById(id);
+const v=$('v'),cv=$('cv'),g=cv.getContext('2d');
+let W=cv.width,H=cv.height,words=[],chunks=[],asr,asrModel,ac,dest,sel=0,lastAct=-1;
+const S={size:1,pos:72,up:false,hl:false,hlc:'#ffe600',delay:0,wpc:4,ain:'pop',aout:'fade',adur:.25};
+const status=t=>$('st').textContent=t;
+const LN={en:'english',ta:'tamil',hi:'hindi',te:'telugu',ml:'malayalam',kn:'kannada',bn:'bengali',mr:'marathi',ur:'urdu',ar:'arabic',es:'spanish',fr:'french'};
+
+/* ---------- Caption styles (add your own here) ----------
+   a = first line, b = second line
+   f = font, c = colour or array of colours (gradient), d:'h' = horizontal gradient,
+   o = outline colour, g = glow colour, s = size multiplier, up = force uppercase */
+const FB=',"Noto Sans Tamil","Noto Sans Devanagari",sans-serif';
+const f=(fam,w=400,it='')=>p=>`${it} ${w} ${p}px "${fam}"${FB}`;
+const T=[
+ {n:'Gold Impact',  a:{f:f('Bebas Neue'),c:'#fff',up:1,s:1.1}, b:{f:f('Montserrat',900,'italic'),c:['#7a5a08','#ffe27a','#b8860b'],s:1.1,up:1}},
+ {n:'Sunset Script',a:{f:f('Montserrat',900),c:['#ff6a00','#ffb347'],s:1.1}, b:{f:f('Dancing Script',700),c:['#fff','#8a8a95'],s:1.25}},
+ {n:'Neon Emerald', a:{f:f('Anton'),c:['#00ff2a','#0c9a28'],up:1,g:'#00ff2a'}, b:{f:f('Montserrat',800),c:'#fff',up:1,s:.9}},
+ {n:'Sapphire Script',a:{f:f('Great Vibes'),c:['#58a0ff','#1f3dff'],s:1.4}, b:{f:f('Montserrat',800),c:'#fff',up:1,s:.85}},
+ {n:'Lime Drop',    a:{f:f('Montserrat',900),c:'#fff',up:1,s:.95}, b:{f:f('Montserrat',900),c:['#c8ff4a','#4f9a10'],up:1,s:1.15}},
+ {n:'Ocean Brush',  a:{f:f('Pacifico'),c:['#35c0ff','#0b3dff'],s:.95}, b:{f:f('Pacifico'),c:'#fff',s:.8}},
+ {n:'Classic Gold', a:{f:f('Bebas Neue'),c:['#a67c00','#fff0a8','#c89b10'],up:1,s:1.2}, b:{f:f('Montserrat',800),c:'#fff',up:1,s:.8}},
+ {n:'Fire Blaze',   a:{f:f('Anton'),c:['#fff200','#ff7a00','#e0120a'],up:1,o:'#2a0500',g:'#ff5a00'}, b:{f:f('Anton'),c:'#fff',up:1,s:.85,o:'#2a0500'}},
+ {n:'Candy Pop',    a:{f:f('Montserrat',900),c:['#ff3cac','#784ba0','#2b86c5'],d:'h',up:1,s:1.05}, b:{f:f('Montserrat',800),c:'#fff',up:1,s:.85}},
+ {n:'Chrome',       a:{f:f('Bebas Neue'),c:['#fff','#8f99ab','#f4f6fa','#5d6676'],up:1,s:1.25}, b:{f:f('Bebas Neue'),c:'#fff',up:1,s:.95}},
+ {n:'Rainbow',      a:{f:f('Anton'),c:['#ff2a2a','#ff9a00','#ffee00','#22dd44','#00b7ff','#8a2be2'],d:'h',up:1,o:'#111'}, b:{f:f('Montserrat',800),c:'#fff',up:1,s:.85}},
+ {n:'Cyan Glow',    a:{f:f('Montserrat',900),c:['#b8fffb','#00e5ff'],up:1,g:'#00e5ff'}, b:{f:f('Montserrat',800),c:'#fff',up:1,s:.85}},
+ {n:'Rose Gold',    a:{f:f('Great Vibes'),c:['#fbd9cc','#e8a089','#f7c1b0'],s:1.4}, b:{f:f('Montserrat',800),c:'#fff',up:1,s:.85}},
+ {n:'Subtitle Yellow',a:{f:f('Anton'),c:'#ffe600',up:1,o:'#000'}, b:{f:f('Anton'),c:'#fff',up:1,o:'#000',s:.9}},
+ {n:'Ice Mint',     a:{f:f('Montserrat',900),c:['#e6fffb','#5eead4','#06b6d4'],up:1}, b:{f:f('Montserrat',800),c:'#fff',up:1,s:.85}},
+ {n:'Royal Purple', a:{f:f('Pacifico'),c:['#d8a8ff','#7c3aed']}, b:{f:f('Pacifico'),c:'#fff',s:.8}},
+ {n:'Hot Red',      a:{f:f('Anton'),c:'#fff',up:1}, b:{f:f('Anton'),c:['#ff7a7a','#d10000'],up:1,s:1.15,o:'#300'}},
+ {n:'Sunrise',      a:{f:f('Montserrat',900),c:['#ffd200','#f7971e','#ff512f'],d:'h',up:1}, b:{f:f('Dancing Script',700),c:'#fff',s:1.25}}
+];
+
+/* ---------- drawing ---------- */
+function drawLine(c2,ws,cx,y,L,base,maxW,act,vis=Infinity){
+  if(!ws.length)return 0;
+  const tx=ws.map(w=>(L.up||S.up)?w.t.toUpperCase():w.t),full=tx.join(' ');
+  let px=base*(L.s||1);c2.font=L.f(px);
+  let w=c2.measureText(full).width;
+  if(w>maxW){px*=maxW/w;c2.font=L.f(px);w=maxW}
+  c2.textAlign='left';c2.textBaseline='alphabetic';c2.lineJoin='round';
+  const x0=cx-w/2;let fill=L.c;
+  if(Array.isArray(L.c)){
+    const gr=L.d==='h'?c2.createLinearGradient(x0,0,x0+w,0):c2.createLinearGradient(0,y-px*.85,0,y+px*.12);
+    L.c.forEach((col,i)=>gr.addColorStop(i/(L.c.length-1),col));fill=gr;
+  }
+  tx.forEach((t,i)=>{
+    if(i>=vis)return;
+    const x=x0+(i?c2.measureText(tx.slice(0,i).join(' ')+' ').width:0);
+    if(L.o){c2.shadowColor='transparent';c2.lineWidth=px*.14;c2.strokeStyle=L.o;c2.strokeText(t,x,y)}
+    if(L.g){c2.shadowColor=L.g;c2.shadowBlur=px*.4;c2.shadowOffsetY=0}
+    else{c2.shadowColor='rgba(0,0,0,.85)';c2.shadowBlur=px*.18;c2.shadowOffsetY=px*.05}
+    c2.fillStyle=(S.hl&&i===act)?S.hlc:fill;c2.fillText(t,x,y);
+  });
+  c2.shadowColor='transparent';
+  return px;
+}
+function drawCaption(c2,ws,w,h,tpl,act,vis=Infinity){
+  const n=ws.length,k=n>1?Math.ceil(n/2):0,base=w*.085*S.size,y1=h*S.pos/100;
+  const p1=k?drawLine(c2,ws.slice(0,k),w/2,y1,tpl.a,base,w*.92,act,vis):0;
+  drawLine(c2,ws.slice(k),w/2,y1+(p1?p1*1.1:0),tpl.b,base,w*.92,act-k,vis-k);
+}
+
+/* ---------- in / out animation ---------- */
+const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+const eo=x=>1-(1-x)**3;
+const eb=x=>{const c=1.70158;return 1+(c+1)*(x-1)**3+c*(x-1)**2};
+function anim(c,t){
+  const d=Math.max(.05,S.adur),p=clamp((t-c.s)/d),q=clamp((c.e-t)/d);
+  let a=1,sc=1,dy=0;
+  switch(S.ain){
+    case'fade':a=p;break;
+    case'pop':sc=eb(p);a=clamp(p*4);break;
+    case'zoom':sc=.6+.4*eo(p);a=p;break;
+    case'up':dy=(1-eo(p))*H*.06;a=p;break;
+    case'down':dy=-(1-eo(p))*H*.06;a=p;break;
+    case'bounce':dy=(1-eb(p))*H*.1;a=clamp(p*3);break;
+  }
+  switch(S.aout){
+    case'fade':a*=q;break;
+    case'shrink':sc*=.6+.4*q;a*=q;break;
+    case'down':dy+=(1-q)*H*.05;a*=q;break;
+    case'up':dy-=(1-q)*H*.05;a*=q;break;
+  }
+  return {a,sc,dy};
+}
+
+const cur=()=>{const t=v.currentTime-S.delay;return chunks.find(c=>t>=c.s&&t<=c.e)};
+function frame(){
+  g.shadowColor='transparent';g.globalAlpha=1;g.drawImage(v,0,0,W,H);
+  const c=cur();if(!c)return;
+  const t=v.currentTime-S.delay;let act=-1;
+  c.ws.forEach((w,i)=>{if(t>=w.s)act=i});
+  const A=anim(c,t),cy=H*S.pos/100;
+  g.save();g.globalAlpha=A.a;
+  g.translate(W/2,cy+A.dy);g.scale(A.sc,A.sc);g.translate(-W/2,-cy);
+  drawCaption(g,c.ws,W,H,T[sel],act,S.ain==='words'?act+1:Infinity);
+  g.restore();
+}
+const mmss=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+(function loop(){
+  if(v.videoWidth){
+    frame();
+    if(document.activeElement!==$('seek')&&v.duration)$('seek').value=v.currentTime/v.duration*1000;
+    $('tm').textContent=`${mmss(v.currentTime)} / ${mmss(v.duration||0)}`;
+    $('play').textContent=v.paused?'Play':'Pause';
+    const c=cur(),i=c?chunks.indexOf(c):-1;
+    if(i!==lastAct){const L=$('list').children;if(L[lastAct])L[lastAct].classList.remove('act');if(L[i])L[i].classList.add('act');lastAct=i}
+  }
+  requestAnimationFrame(loop);
+})();
+
+/* ---------- style thumbnails (each button shows the real style) ---------- */
+const FONTS=['Anton','Bebas Neue','Montserrat','Dancing Script','Great Vibes','Pacifico'];
+function renderThumbs(){
+  const box=$('tp');box.innerHTML='';
+  T.forEach((t,i)=>{
+    const b=document.createElement('button');b.className='th'+(i===sel?' on':'');b.title=t.n;b.setAttribute('aria-label',t.n);
+    const c=document.createElement('canvas');c.width=300;c.height=146;
+    const x=c.getContext('2d'),bg=x.createLinearGradient(0,0,0,146);bg.addColorStop(0,'#2a2a36');bg.addColorStop(1,'#14141b');
+    x.fillStyle=bg;x.fillRect(0,0,300,146);
+    const keep=S.hl;S.hl=false;
+    drawCaption(x,[{t:'Your'},{t:'Caption'}],300,146,t,-1);
+    S.hl=keep;
+    b.append(c);b.onclick=()=>{sel=i;[...box.children].forEach((e,j)=>e.classList.toggle('on',j===i))};
+    box.append(b);
+  });
+}
+async function loadFonts(){
+  if(document.readyState!=='complete')await new Promise(r=>addEventListener('load',r));
+  await Promise.all([...FONTS.map(n=>document.fonts.load(`40px "${n}"`,'Aa')),
+    document.fonts.load('800 40px "Noto Sans Tamil"','தமிழ்'),document.fonts.load('800 40px "Noto Sans Devanagari"','हिन्दी')]);
+  await document.fonts.ready;renderThumbs();
+}
+renderThumbs();loadFonts();
+
+/* ---------- controls ---------- */
+$('up').onchange=e=>{S.up=e.target.checked;renderThumbs()};
+$('size').oninput=e=>S.size=e.target.value/100;
+$('pos').oninput=e=>S.pos=+e.target.value;
+$('adur').oninput=e=>S.adur=e.target.value/100;
+$('ain').onchange=e=>S.ain=e.target.value;
+$('aout').onchange=e=>S.aout=e.target.value;
+$('delay').oninput=e=>{S.delay=e.target.value/100;status(`Timing shift: ${S.delay>0?'+':''}${S.delay.toFixed(2)} s`)};
+$('hlc').oninput=e=>S.hlc=e.target.value;
+$('hl').onchange=e=>S.hl=e.target.checked;
+$('wpc').onchange=e=>{S.wpc=+e.target.value;if(words.length){build();renderList();status('Captions re-split. Manual edits were reset.')}};
+$('seek').oninput=e=>{if(v.duration)v.currentTime=e.target.value/1000*v.duration};
+const refreshBtns=()=>{$('exp').disabled=$('srt').disabled=!chunks.length};
+
+/* ---------- load video ---------- */
+$('file').onchange=e=>{
+  const file=e.target.files[0];if(!file)return;
+  v.src=URL.createObjectURL(file);
+  v.onloadedmetadata=()=>{
+    const s=Math.min(1,1280/Math.max(v.videoWidth,v.videoHeight));
+    W=cv.width=Math.round(v.videoWidth*s/2)*2;H=cv.height=Math.round(v.videoHeight*s/2)*2;
+    v.currentTime=.01;$('go').disabled=false;$('play').disabled=false;$('add').disabled=false;
+    words=[];chunks=[];renderList();refreshBtns();
+    status('Video ready. Choose the language, then tap Generate captions.');
+  };
+};
+
+/* ---------- audio prep + speech-region detection ---------- */
+async function prepAudio(file){
+  const a=new AudioContext({sampleRate:16000});
+  const buf=await a.decodeAudioData(await file.arrayBuffer());
+  const n=buf.length,out=new Float32Array(n),ch=buf.numberOfChannels;
+  for(let c=0;c<ch;c++){const d=buf.getChannelData(c);for(let i=0;i<n;i++)out[i]+=d[i]/ch}   // mix all channels
+  let peak=0;for(let i=0;i<n;i++){const x=Math.abs(out[i]);if(x>peak)peak=x}
+  if(peak>0&&peak<.9){const k=Math.min(.9/peak,10);for(let i=0;i<n;i++)out[i]*=k}              // lift quiet voices
+  a.close();return out;
+}
+/* Finds where people actually speak, so no speech is skipped and silence is not "heard".
+   Long regions are cut at their quietest point so a word is never split in half. */
+function plan(a,maxLen){
+  const fl=480,nF=Math.floor(a.length/fl),e=new Float32Array(nF),fs=fl/16000;
+  for(let i=0;i<nF;i++){let s=0;for(let j=0;j<fl;j++){const x=a[i*fl+j];s+=x*x}e[i]=Math.sqrt(s/fl)}
+  const sorted=Array.from(e).sort((x,y)=>x-y),floor=sorted[Math.floor(nF*.1)]||0,thr=Math.max(.006,floor*2.5);
+  const regs=[];let st=-1,gap=0;
+  for(let i=0;i<nF;i++){
+    if(e[i]>thr){if(st<0)st=i;gap=0}
+    else if(st>=0&&++gap>33){regs.push([st,i-gap]);st=-1;gap=0}
+  }
+  if(st>=0)regs.push([st,nF-1-gap]);
+  const out=[],maxF=Math.floor(maxLen/fs),win=Math.floor(6/fs);
+  regs.forEach(([s0,e0])=>{
+    let s=Math.max(0,s0-10);const en=Math.min(nF,e0+10);
+    while(en-s>maxF){
+      let best=s+maxF,bv=1e9;
+      for(let i=s+maxF-win;i<s+maxF;i++){if(e[i]<bv){bv=e[i];best=i}}
+      out.push([s,best]);s=best;
+    }
+    if((en-s)*fs>.3)out.push([s,en]);
+  });
+  return out.map(([s,en])=>[Math.floor(s*fl),Math.min(a.length,Math.floor(en*fl))]);
+}
+function wav(f32){
+  const n=f32.length,b=new ArrayBuffer(44+n*2),d=new DataView(b),ws=(o,s)=>[...s].forEach((c,i)=>d.setUint8(o+i,c.charCodeAt(0)));
+  ws(0,'RIFF');d.setUint32(4,36+n*2,true);ws(8,'WAVE');ws(12,'fmt ');d.setUint32(16,16,true);d.setUint16(20,1,true);d.setUint16(22,1,true);
+  d.setUint32(24,16000,true);d.setUint32(28,32000,true);d.setUint16(32,2,true);d.setUint16(34,16,true);ws(36,'data');d.setUint32(40,n*2,true);
+  for(let i=0;i<n;i++){const x=Math.max(-1,Math.min(1,f32[i]));d.setInt16(44+i*2,x<0?x*0x8000:x*0x7fff,true)}
+  return b;
+}
+const spread=(txt,a,b)=>{const ws=txt.trim().split(/\s+/).filter(Boolean),d=(b-a)/Math.max(ws.length,1);return ws.map((t,i)=>({t,s:a+i*d,e:a+(i+1)*d}))};
+
+/* ---------- engine 1: cloud (Whisper large-v3 through your own /api/transcribe) ---------- */
+async function cloudRegion(sub,lang,hint){
+  const url=`/api/transcribe?lang=${lang}&prompt=${encodeURIComponent(hint.slice(0,300))}`,body=wav(sub);
+  for(let k=0;k<4;k++){
+    let r;
+    try{r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body})}
+    catch(e){throw Object.assign(new Error('Cloud not reachable'),{config:true})}
+    if(r.status===429){status('Cloud is busy, waiting a few seconds…');await new Promise(z=>setTimeout(z,8000));continue}
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok)throw Object.assign(new Error(j.error?.message||j.error||`Cloud error ${r.status}`),{config:[401,403,404].includes(r.status)||j.error==='nokey'});
+    if(j.words?.length)return j.words.map(w=>({t:String(w.word).trim(),s:w.start,e:w.end}));
+    const out=[];(j.segments||[]).forEach(sg=>out.push(...spread(sg.text||'',sg.start,sg.end)));return out;
+  }
+  throw new Error('Cloud is busy. Try again in a minute.');
+}
+
+/* ---------- engine 2: on-device Whisper ---------- */
+async function getAsr(model){
+  if(asr&&asrModel===model)return asr;
+  $('pr').hidden=false;$('pr').max=100;
+  asr=await pipeline('automatic-speech-recognition',model,{progress_callback:p=>{
+    if(p.status==='progress'){$('pr').value=p.progress;status(`Downloading speech model… ${Math.round(p.progress)}% (first time only)`)}
+  }});
+  asrModel=model;return asr;
+}
+async function localRegion(sub,lang){
+  const o={chunk_length_s:30,task:'transcribe',...(lang?{language:LN[lang]}:{})};
+  try{
+    const r=await asr(sub,{...o,return_timestamps:'word'});
+    return r.chunks.map(c=>({t:c.text.trim(),s:c.timestamp[0]??0,e:c.timestamp[1]}));
+  }catch(err){
+    const r=await asr(sub,{...o,return_timestamps:true}),out=[];
+    r.chunks.forEach(c=>out.push(...spread(c.text,c.timestamp[0]??0,c.timestamp[1]??(c.timestamp[0]+2))));
+    return out;
+  }
+}
+
+async function run(engine,audio,lang,hint){
+  const regs=plan(audio,engine==='cloud'?55:28),out=[];
+  if(engine==='local')await getAsr($('acc').value);
+  $('pr').hidden=false;$('pr').max=Math.max(1,regs.length);
+  for(let i=0;i<regs.length;i++){
+    status(`Transcribing speech ${i+1} of ${regs.length}…`);$('pr').value=i;
+    const [a,b]=regs[i],sub=audio.subarray(a,b),off=a/16000;
+    const ws=engine==='cloud'?await cloudRegion(sub,lang,hint):await localRegion(sub,lang);
+    ws.forEach(w=>{w.s+=off;w.e=(w.e??w.s)+off});out.push(...ws);
+  }
+  return out;
+}
+function clean(ws){
+  ws=ws.filter(w=>w.t&&!/^[\[(].*[\])]$/.test(w.t));
+  let last=0;
+  ws.forEach(w=>{
+    if(w.s<last)w.s=last;
+    if(w.e==null||w.e<=w.s)w.e=w.s+.3;
+    if(w.e-w.s>1.2)w.e=w.s+.6;
+    last=w.s;
+  });
+  return ws.filter((w,i)=>!(i>=3&&ws[i-1].t===w.t&&ws[i-2].t===w.t&&ws[i-3].t===w.t));
+}
+$('go').onclick=async()=>{
+  const file=$('file').files[0];if(!file)return;
+  $('go').disabled=true;S.wpc=+$('wpc').value;
+  const lang=$('lang').value,hint=$('hint').value.trim();
+  try{
+    status('Reading audio…');$('pr').hidden=false;$('pr').removeAttribute('value');
+    const audio=await prepAudio(file);
+    let ws;
+    if($('eng').value==='cloud'){
+      try{ws=await run('cloud',audio,lang,hint)}
+      catch(err){
+        if(!err.config)throw err;
+        status('Cloud is not set up yet, so using the on-device model instead…');
+        ws=await run('local',audio,lang,hint);
+      }
+    }else ws=await run('local',audio,lang,hint);
+    words=clean(ws);
+    if(!words.length){status('No speech found. Choose the spoken language instead of Auto-detect, or add captions by hand.');}
+    else{build();renderList();status(`Done: ${chunks.length} captions. Fix any wrong words or times below, then export.`)}
+    refreshBtns();
+  }catch(err){console.error(err);status(err.message&&err.message.length<120?err.message:"Couldn't process this video's audio. Try a shorter or smaller file.")}
+  $('pr').hidden=true;$('go').disabled=false;
+};
+
+/* ---------- caption chunks + editor ---------- */
+const sortChunks=()=>chunks.sort((a,b)=>a.s-b.s);
+function build(){
+  chunks=[];let cw=[];
+  words.forEach((w,i)=>{
+    cw.push({...w});const nx=words[i+1];
+    const brk=cw.length>=S.wpc||!nx||nx.s-w.e>.7||(cw.length>=2&&/[.?!।,;]$/.test(w.t));
+    if(brk){chunks.push({s:cw[0].s,e:Math.min(cw.at(-1).e+.3,nx?nx.s:1e9),ws:cw});cw=[]}
+  });
+}
+function setText(c,txt){
+  const arr=txt.trim().split(/\s+/).filter(Boolean);if(!arr.length)return;
+  if(arr.length===c.ws.length)arr.forEach((t,i)=>c.ws[i].t=t);
+  else c.ws=spread(arr.join(' '),c.ws[0].s,c.ws.at(-1).e);
+}
+function retime(c,ns,ne){
+  ns=Math.max(0,ns);if(ne<ns+.1)ne=ns+.1;
+  const a=c.ws[0].s,b=c.ws.at(-1).e,k=(ne-ns)/Math.max(b-a,.01);
+  c.ws.forEach(w=>{w.s=ns+(w.s-a)*k;w.e=ns+(w.e-a)*k});
+  c.s=ns;c.e=ne;
+}
+const showAt=c=>{v.pause();v.currentTime=Math.min(c.s+S.delay+S.adur+.05,c.e+S.delay-.02)};
+function renderList(focusChunk){
+  const L=$('list');L.innerHTML='';lastAct=-1;sortChunks();
+  if(!chunks.length){L.innerHTML='<div class="empty">No captions yet. Generate them, or tap "Add caption at playhead".</div>';return}
+  chunks.forEach(c=>{
+    const r=document.createElement('div');r.className='r';
+    const tx=document.createElement('input');tx.className='tx';tx.value=c.ws.map(w=>w.t).join(' ');tx.setAttribute('aria-label','Caption text');
+    tx.oninput=()=>setText(c,tx.value);tx.onfocus=()=>showAt(c);
+    const row=document.createElement('div');row.className='tr';
+    const num=(lbl,val,apply)=>{
+      const l=document.createElement('label'),i=document.createElement('input');
+      l.append(lbl+' ');i.type='number';i.step='0.05';i.min='0';i.value=val.toFixed(2);i.setAttribute('aria-label',lbl+' time in seconds');
+      i.onchange=()=>{const n=parseFloat(i.value);if(!isNaN(n)){apply(n);renderList()}};
+      l.append(i);return l;
+    };
+    const now=(lbl,apply)=>{const b=document.createElement('button');b.textContent=lbl;b.onclick=()=>{apply(Math.max(0,v.currentTime-S.delay));renderList()};return b};
+    const play=document.createElement('button');play.textContent='▶';play.setAttribute('aria-label','Play this caption');
+    play.onclick=async()=>{v.currentTime=Math.max(0,c.s+S.delay-.3);await v.play()};
+    const del=document.createElement('button');del.textContent='✕';del.setAttribute('aria-label','Delete caption');
+    del.onclick=()=>{chunks.splice(chunks.indexOf(c),1);renderList();refreshBtns()};
+    row.append(num('In',c.s,n=>retime(c,n,c.e)),now('In=now',n=>retime(c,n,c.e)),
+               num('Out',c.e,n=>retime(c,c.s,n)),now('Out=now',n=>retime(c,c.s,n)),play,del);
+    r.append(tx,row);L.append(r);
+    if(c===focusChunk){tx.focus();tx.select()}
+  });
+}
+$('add').onclick=()=>{
+  const s=Math.max(0,v.currentTime-S.delay),e=Math.min(s+2,v.duration||s+2);
+  const c={s,e,ws:spread('New caption',s,e)};
+  chunks.push(c);renderList(c);refreshBtns();
+};
+
+/* ---------- SRT ---------- */
+const st=s=>{s=Math.max(0,s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=Math.floor(s%60),ms=Math.round(s%1*1000);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')},${String(ms).padStart(3,'0')}`};
+$('srt').onclick=()=>{
+  sortChunks();
+  const txt=chunks.map((c,i)=>`${i+1}\n${st(c.s+S.delay)} --> ${st(c.e+S.delay)}\n${c.ws.map(w=>w.t).join(' ')}\n`).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain'}));a.download='captions.srt';a.click();
+};
+
+/* ---------- play + export ---------- */
+function initAudio(){
+  if(ac)return ac.resume();
+  ac=new AudioContext();const src=ac.createMediaElementSource(v);
+  dest=ac.createMediaStreamDestination();src.connect(dest);src.connect(ac.destination);
+  return ac.resume();
+}
+$('play').onclick=async()=>{await initAudio();v.paused?v.play():v.pause()};
+$('exp').onclick=async()=>{
+  if(!cv.captureStream){status('Export is not supported in this browser. Use Chrome.');return}
+  await initAudio();
+  const stream=cv.captureStream(30);
+  dest.stream.getAudioTracks().forEach(t=>stream.addTrack(t));
+  const mime=['video/mp4;codecs=avc1','video/webm;codecs=vp9,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m));
+  const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8e6}),parts=[];
+  rec.ondataavailable=e=>parts.push(e.data);
+  rec.onstop=()=>{
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(parts,{type:mime}));
+    a.download='captioned.'+(mime.includes('mp4')?'mp4':'webm');a.click();
+    status('Exported. Check your downloads.');$('exp').disabled=false;
+  };
+  $('exp').disabled=true;v.pause();v.currentTime=0;
+  await new Promise(r=>v.onseeked=r);
+  await v.play();rec.start();
+  v.onended=()=>{rec.stop();v.onended=null};
+  status('Exporting in real time. Keep this tab open until it finishes.');
+};
+</script>
+</body>
+</html>
