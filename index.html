@@ -308,8 +308,26 @@ const groupSpecs=list=>{
    2. Add a line below: [ 'Name shown', 'fonts/FileName.ttf', optionalSizeScale ]
    Only use fonts you are licensed to use. Example:
    ta:[['My Tamil Brush','fonts/MyTamilBrush.ttf'],['Poster Bold','fonts/PosterBold.woff2',1.1]]            */
-const MY_FONTS={latin:[],ta:[],hi:[],te:[],ml:[],kn:[],bn:[],ar:[]};
-Object.entries(MY_FONTS).forEach(([k,a])=>a.forEach(([name,url,sc])=>FP[k].push({f:name,w:400,i:'',s:sc||1,url})));
+const MY_FONTS={latin:[],ta:[
+  ['Tamil 1','fonts/tam1.ttf'],
+  ['Tamil 2','fonts/tam2.ttf'],
+  ['Tamil 3','fonts/tam3.ttf'],
+  ['Tamil 4','fonts/tam4.ttf'],
+  ['Tamil 5','fonts/tam5.ttf'],
+  ['Tamil 6','fonts/tam6.ttf'],
+  ['Tamil 7','fonts/tam7.ttf'],
+  ['Tamil 8','fonts/tam8.ttf'],
+  ['Tamil 9','fonts/tam9.ttf'],
+  ['Tamil 10','fonts/tam10.ttf'],
+  ['Tamil 11','fonts/tam11.ttf'],
+  ['Tamil 12','fonts/tam12.ttf'],
+  ['Tamil 13','fonts/tam13.ttf'],
+  ['Tamil 14','fonts/tam14.ttf'],
+  ['Tamil 15','fonts/tam15.ttf'],
+  ['Tamil 16','fonts/tam16.ttf']
+],hi:[],te:[],ml:[],kn:[],bn:[],ar:[]};
+  
+bject.entries(MY_FONTS).forEach(([k,a])=>a.forEach(([name,url,sc])=>FP[k].push({f:name,w:400,i:'',s:sc||1,url})));
 const famLink={};
 function prepFonts(pk){
   groupSpecs(FP[pk].filter(o=>!o.url)).forEach(([f,spec])=>famLink[f]=addLink(spec));
