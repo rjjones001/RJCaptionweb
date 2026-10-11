@@ -82,6 +82,12 @@ video{display:none}
 .empty{color:var(--mute);font-size:13px;padding:6px 2px}
 .cta{padding:14px;font-size:16px;width:100%}
 
+/* font picker */
+.fl{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:380px;overflow-y:auto;padding:2px}
+.fb{display:block;text-align:left;padding:10px 12px;border-radius:14px;min-width:0}
+.fb[aria-pressed=true]{border-color:#c084fc;box-shadow:0 0 0 2px rgba(192,132,252,.5);background:rgba(139,92,246,.12)}
+.fb .sm{display:block;font-size:21px;line-height:1.55;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fb .fn{display:block;font-size:11px;color:var(--mute);margin-top:2px;font-family:Manrope,system-ui,sans-serif;font-weight:600}
 @media(min-width:900px){
   body{max-width:1080px}
   .app{display:grid;grid-template-columns:400px 1fr;gap:26px;align-items:start}
@@ -139,8 +145,19 @@ video{display:none}
       <div class="body"><div class="thumbs" id="tp" role="group" aria-label="Caption style"></div></div>
     </details>
 
+    <details class="card" id="fontCard">
+      <summary><span class="n">3</span>Fonts</summary>
+      <div class="body">
+        <span class="lbl">Apply the font to</span>
+        <div class="seg" id="fscope"></div>
+        <div class="msg" id="fsel" style="margin:10px 0 0"></div>
+        <span class="lbl">Fonts for <b id="fname"></b> (tap one to use it)</span>
+        <div class="fl" id="fl"></div>
+      </div>
+    </details>
+
     <details class="card" open>
-      <summary><span class="n">3</span>Animation and layout</summary>
+      <summary><span class="n">4</span>Animation and layout</summary>
       <div class="body">
         <span class="lbl">Caption in</span><div class="chips" id="ainChips"></div>
         <span class="lbl">Caption out</span><div class="chips" id="aoutChips"></div>
@@ -159,7 +176,7 @@ video{display:none}
     </details>
 
     <details class="card" open>
-      <summary><span class="n">4</span>Edit captions</summary>
+      <summary><span class="n">5</span>Edit captions</summary>
       <div class="body">
         <button id="add" disabled style="width:100%">+ Add caption at playhead</button>
         <div id="list"><div class="empty">Captions will appear here after you generate them.</div></div>
@@ -167,7 +184,7 @@ video{display:none}
     </details>
 
     <details class="card" open>
-      <summary><span class="n">5</span>Export</summary>
+      <summary><span class="n">6</span>Export</summary>
       <div class="body">
         <span class="lbl">Quality</span>
         <div class="seg" id="qChips"></div>
@@ -190,8 +207,8 @@ const $=id=>document.getElementById(id);
 const v=$('v'),cv=$('cv'),g=cv.getContext('2d');
 let W=cv.width,H=cv.height,words=[],chunks=[],asr,asrModel,ac,dest,spk,sel=0,lastAct=-1;
 let lang='',engine='cloud',model='Xenova/whisper-small',quality='sd';
-let exporting=false,pumpMode=false,endHook=null,lastBlob=null,lastName='';
-const S={size:1,pos:72,up:false,hl:false,hlc:'#ffe600',delay:0,wpc:4,ain:'pop',aout:'fade',adur:.25,pack:'latin',rtl:false};
+let fscope='both',exporting=false,pumpMode=false,endHook=null,lastBlob=null,lastName='';
+const S={size:1,pos:72,up:false,hl:false,hlc:'#ffe600',delay:0,wpc:4,ain:'pop',aout:'fade',adur:.25,pack:'latin',rtl:false,ov:{}};
 const status=t=>$('st').textContent=t, xmsg=t=>$('xst').textContent=t;
 const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
 function setBar(id,f){
@@ -237,24 +254,70 @@ function detectPack(txt){
   SC.forEach(([re,k])=>{const c=(txt.match(re)||[]).length;if(c>n){n=c;best=k}});
   return best;
 }
+const linked={};
+const addLink=spec=>linked[spec]||(linked[spec]=new Promise(res=>{
+  const l=document.createElement('link');l.rel='stylesheet';l.href=`https://fonts.googleapis.com/css2?family=${spec}&display=swap`;
+  l.onload=l.onerror=res;document.head.append(l);
+}));
 const loaded={};
 function loadPack(key){
   if(loaded[key])return loaded[key];
   const p=P[key],sample=p.sample.join(' ');
   return loaded[key]=(async()=>{
-    await Promise.all(p.fam.map(spec=>new Promise(res=>{
-      const l=document.createElement('link');l.rel='stylesheet';l.href=`https://fonts.googleapis.com/css2?family=${spec}&display=swap`;
-      l.onload=l.onerror=res;document.head.append(l);
-    })));
+    await Promise.all(p.fam.map(addLink));
     await Promise.allSettled(Object.values(p.r).map(([fam,w,it])=>document.fonts.load(`${it||''} ${w} 40px "${fam}"`,sample)));
     await document.fonts.ready;
   })();
 }
 async function setPack(key){
   S.pack=key;S.rtl=!!P[key].rtl;renderThumbs();
+  if($('fontCard').open)renderFonts();
   await loadPack(key);
   if(S.pack===key)renderThumbs();
 }
+
+/* ---------- Font lists, language by language: 'Family|weight|italic|sizeScale' ---------- */
+const FL={
+ latin:['Anton','Bebas Neue|400||1.15','Oswald|700','Archivo Black','Montserrat|900','Montserrat|900|i','Poppins|800','Raleway|900','Russo One','Bangers','Luckiest Guy','Lilita One','Titan One','Bungee','Righteous','Playfair Display|900','Abril Fatface','Cinzel|800','Lobster','Pacifico|400||.9','Dancing Script|700||1.2','Great Vibes|400||1.4','Satisfy|400||1.2','Caveat|700||1.3','Permanent Marker','Shrikhand'],
+ ta:['Anek Tamil|800','Anek Tamil|700','Anek Tamil|600','Anek Tamil|500','Anek Tamil|400','Anek Tamil|300','Catamaran|900','Catamaran|800','Catamaran|700','Catamaran|600','Catamaran|500','Catamaran|400','Baloo Thambi 2|800','Baloo Thambi 2|700','Baloo Thambi 2|600','Baloo Thambi 2|500','Baloo Thambi 2|400','Mukta Malar|800','Mukta Malar|700','Mukta Malar|600','Mukta Malar|500','Mukta Malar|400','Hind Madurai|700','Hind Madurai|600','Hind Madurai|500','Hind Madurai|400','Noto Sans Tamil|900','Noto Sans Tamil|800','Noto Sans Tamil|700','Noto Sans Tamil|600','Noto Sans Tamil|500','Noto Serif Tamil|900','Noto Serif Tamil|800','Noto Serif Tamil|700','Noto Serif Tamil|600','Noto Serif Tamil|500','Noto Serif Tamil|900|i','Noto Serif Tamil|700|i','Kavivanar|400||1.1','Tiro Tamil|400','Tiro Tamil|400|i|1.1','Meera Inimai','Pavanam','Karla Tamil Upright|700','Karla Tamil Upright|400','Karla Tamil Inclined|700','Karla Tamil Inclined|400'],
+ hi:['Khand|700||1.15','Teko|700||1.2','Rajdhani|700||1.1','Poppins|800','Mukta|800','Hind|700','Yantramanav|900','Baloo 2|800','Palanquin Dark|700','Rozha One','Eczar|800','Martel|800','Yatra One|400||1.05','Kalam|700||1.15','Tillana|800','Modak','Sarpanch|800','Noto Serif Devanagari|800','Noto Sans Devanagari|800'],
+ te:['Anek Telugu|800','Anek Telugu|600','Noto Sans Telugu|800','Noto Serif Telugu|800','Hind Guntur|700','Chathura|800||1.2','Mandali|400||1.1','Ramabhadra|400||1.1','NTR','Gurajada','Suranna','Dhurjati','Peddana'],
+ ml:['Anek Malayalam|800','Anek Malayalam|600','Noto Sans Malayalam|800','Noto Serif Malayalam|800','Manjari|700','Baloo Chettan 2|800','Chilanka|400||1.1','Gayathri|700'],
+ kn:['Anek Kannada|800','Anek Kannada|600','Noto Sans Kannada|800','Noto Serif Kannada|800','Baloo Tamma 2|800','Tiro Kannada|400||1.05','Hubballi|400||1.1'],
+ bn:['Anek Bangla|800','Anek Bangla|600','Noto Sans Bengali|800','Noto Serif Bengali|800','Hind Siliguri|700','Baloo Da 2|800','Atma|700','Galada|400||1.1','Mina|700','Tiro Bangla|400||1.05'],
+ ar:['Lalezar','Reem Kufi|700','Cairo|900','Tajawal|800','Changa|800','Almarai|800','El Messiri|700','Rakkas','Lemonada|700','Amiri|700','Harmattan|700','Aref Ruqaa|700||1.1','Noto Naskh Arabic|700','Noto Nastaliq Urdu|700||.85','Katibeh|400||1.1','Markazi Text|700']
+};
+const parseF=str=>{const [f,w,i,sc]=str.split('|');return {f,w:+w||400,i:i?'italic':'',s:+sc||1}};
+const FP={};Object.keys(FL).forEach(k=>FP[k]=FL[k].map(parseF));
+const specOf=o=>o.f.replace(/ /g,'+')+(o.i?(o.w===400?':ital@1':`:ital,wght@1,${o.w}`):(o.w===400?'':`:wght@${o.w}`));
+const WL={300:' Light',500:' Medium',600:' SemiBold',700:' Bold',800:' ExtraBold',900:' Black'};
+const nameOf=(o,list=FP[S.pack])=>o.f+(WL[o.w]||(o.w===400&&list.filter(x=>x.f===o.f).length>1?' Regular':''))+(o.i?' Italic':'')+(o.url?' (yours)':'');
+/* One Google Fonts request per family (weights must be in ascending order) */
+const groupSpecs=list=>{
+  const m={};list.forEach(o=>(m[o.f]||(m[o.f]=[])).push([o.i?1:0,o.w]));
+  return Object.entries(m).map(([f,a])=>{
+    a=[...new Map(a.map(x=>[x.join(),x])).values()].sort((x,y)=>x[0]-y[0]||x[1]-y[1]);
+    const n=f.replace(/ /g,'+');
+    if(a.some(x=>x[0]))return [f,`${n}:ital,wght@${a.map(x=>x.join(',')).join(';')}`];
+    const ws=a.map(x=>x[1]);
+    return [f,ws.length===1&&ws[0]===400?n:`${n}:wght@${ws.join(';')}`];
+  });
+};
+/* ---- YOUR OWN FONTS ----
+   1. Put your .ttf / .otf / .woff2 files in a "fonts" folder next to index.html in your repo.
+   2. Add a line below: [ 'Name shown', 'fonts/FileName.ttf', optionalSizeScale ]
+   Only use fonts you are licensed to use. Example:
+   ta:[['My Tamil Brush','fonts/MyTamilBrush.ttf'],['Poster Bold','fonts/PosterBold.woff2',1.1]]            */
+const MY_FONTS={latin:[],ta:[],hi:[],te:[],ml:[],kn:[],bn:[],ar:[]};
+Object.entries(MY_FONTS).forEach(([k,a])=>a.forEach(([name,url,sc])=>FP[k].push({f:name,w:400,i:'',s:sc||1,url})));
+const famLink={};
+function prepFonts(pk){
+  groupSpecs(FP[pk].filter(o=>!o.url)).forEach(([f,spec])=>famLink[f]=addLink(spec));
+  FP[pk].filter(o=>o.url&&!famLink[o.f]).forEach(o=>{
+    const ff=new FontFace(o.f,`url(${o.url})`);document.fonts.add(ff);famLink[o.f]=ff.load().catch(()=>{});
+  });
+}
+const ovT=ln=>{const x=S.ov[S.pack],t=x&&x[ln]!=null?FP[S.pack][x[ln]]:null;return t?[t.f,t.w,t.i,t.s]:null};
 
 /* ---------- Caption styles: colours and effects only (fonts come from the language pack) ----------
    r = font role, c = colour or gradient array, d:'h' = horizontal gradient,
@@ -281,9 +344,9 @@ const T=[
 ];
 
 /* ---------- drawing ---------- */
-function drawLine(c2,ws,cx,y,L,base,maxW,act,vis=Infinity){
+function drawLine(c2,ws,cx,y,L,base,maxW,act,vis=Infinity,ln='a'){
   if(!ws.length)return 0;
-  const pk=P[S.pack],[fam,wt=400,it='',rs=1]=pk.r[L.r],ff=px=>`${it} ${wt} ${px}px "${fam}",${pk.fb}`;
+  const pk=P[S.pack],[fam,wt=400,it='',rs=1]=ovT(ln)||pk.r[L.r],ff=px=>`${it} ${wt} ${px}px "${fam}",${pk.fb}`;
   const txt=ws.map(w=>(L.up||S.up)?w.t.toUpperCase():w.t),order=[...txt.keys()];
   if(S.rtl)order.reverse();
   const vt=order.map(i=>txt[i]);
@@ -309,8 +372,8 @@ function drawLine(c2,ws,cx,y,L,base,maxW,act,vis=Infinity){
 }
 function drawCaption(c2,ws,w,h,tpl,act,vis=Infinity){
   const n=ws.length,k=n>1?Math.ceil(n/2):0,base=w*.085*S.size,y1=h*S.pos/100,lh=P[S.pack].lh;
-  const p1=k?drawLine(c2,ws.slice(0,k),w/2,y1,tpl.a,base,w*.92,act,vis):0;
-  drawLine(c2,ws.slice(k),w/2,y1+(p1?p1*lh:0),tpl.b,base,w*.92,act-k,vis-k);
+  const p1=k?drawLine(c2,ws.slice(0,k),w/2,y1,tpl.a,base,w*.92,act,vis,'a'):0;
+  drawLine(c2,ws.slice(k),w/2,y1+(p1?p1*lh:0),tpl.b,base,w*.92,act-k,vis-k,'b');
 }
 
 /* ---------- in / out animation ---------- */
@@ -391,6 +454,39 @@ chips('modelChips',[['Xenova/whisper-base','Fast'],['Xenova/whisper-small','Accu
 chips('wpcChips',[2,3,4,5,6].map(n=>[n,n]),()=>S.wpc,n=>{S.wpc=+n;rechunk()});
 chips('ainChips',[['none','None'],['fade','Fade'],['pop','Pop'],['zoom','Zoom'],['up','Slide up'],['down','Slide down'],['bounce','Bounce'],['words','Word by word']],()=>S.ain,val=>S.ain=val);
 chips('aoutChips',[['none','None'],['fade','Fade'],['shrink','Shrink'],['down','Slide down'],['up','Slide up']],()=>S.aout,val=>S.aout=val);
+chips('fscope',[['both','Both lines'],['a','Line 1'],['b','Line 2']],()=>fscope,val=>{fscope=val;markFonts()});
+function markFonts(){
+  const x=S.ov[S.pack]||{},list=FP[S.pack],sc=fscope;
+  [...$('fl').children].forEach(b=>{
+    const i=b.dataset.i==='d'?null:+b.dataset.i;
+    const on=sc==='both'?((x.a??null)===i&&(x.b??null)===i):((x[sc]??null)===i);
+    b.setAttribute('aria-pressed',String(on));
+  });
+  const nm=ln=>x[ln]!=null?nameOf(list[x[ln]]):'Style default';
+  $('fsel').textContent=`Line 1: ${nm('a')}  ·  Line 2: ${nm('b')}`;
+}
+function renderFonts(){
+  const pk=S.pack,box=$('fl'),smp=P[pk].sample.join(' ');
+  $('fname').textContent=P[pk].nm;box.innerHTML='';
+  const mk=(i,label,css)=>{
+    const b=document.createElement('button');b.className='fb';b.dataset.i=i;
+    const a=document.createElement('span');a.className='sm';a.textContent=smp;if(css)a.style.cssText=css;
+    const n=document.createElement('span');n.className='fn';n.textContent=label;
+    b.append(a,n);
+    b.onclick=async()=>{
+      const x=S.ov[pk]||(S.ov[pk]={}),v2=i==='d'?null:+i,lines=fscope==='both'?['a','b']:[fscope];
+      lines.forEach(ln=>x[ln]=v2);
+      if(v2!=null){const o=FP[pk][v2];await famLink[o.f];await document.fonts.load(`${o.i} ${o.w} 30px "${o.f}"`,smp)}
+      markFonts();renderThumbs();
+    };
+    box.append(b);
+  };
+  mk('d','Style default','');
+  prepFonts(pk);
+  FP[pk].forEach((o,i)=>mk(i,nameOf(o,FP[pk]),`font-family:"${o.f}",${P[pk].fb};font-weight:${o.w};font-style:${o.i||'normal'}`));
+  markFonts();
+}
+$('fontCard').addEventListener('toggle',()=>{if($('fontCard').open)renderFonts()});
 chips('qChips',[['sd','Standard 720p'],['hd','HD 1080p']],()=>quality,val=>quality=val);
 const syncEngine=()=>{$('localBox').hidden=engine!=='local';$('hintBox').hidden=engine!=='cloud'};syncEngine();
 function rechunk(){if(words.length){build();renderList();status('Captions re-split. Manual edits were reset.')}}
